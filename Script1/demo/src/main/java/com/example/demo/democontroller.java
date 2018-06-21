@@ -3,6 +3,7 @@ package com.example.demo;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.util.ArrayList;
 import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -24,6 +25,7 @@ import org.web3j.crypto.RawTransaction;
 import org.web3j.crypto.TransactionEncoder;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.DefaultBlockParameterName;
+import org.web3j.protocol.core.RemoteCall;
 import org.web3j.protocol.core.methods.response.EthGetTransactionCount;
 import org.web3j.protocol.core.methods.response.EthSendTransaction;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
@@ -42,11 +44,17 @@ public class democontroller {
 
 	@Autowired
 	ToAccountsRepository toaccountsrepository;
+	
+	@Autowired
+	ContractRepository contractrepository;
 
 	long fromAccountscount = 0;
 	// Random r2 = new Random();
 
-	private Web3j web3j = Web3j.build(new HttpService("http://206.189.229.33:8545"));
+	
+ 	@Autowired
+    Web3j web3j;
+	//private Web3j web3j = Web3j.build(new HttpService("http://206.189.229.33:8545"));
 
 	private String senderPrivKey = "8def6abc00c429f80b6b8911d62e97b53a2da2f86e537bedd56c508b09d576f2";
 	Credentials credentialOfSender = Credentials.create(senderPrivKey);
@@ -126,7 +134,7 @@ public class democontroller {
 						DefaultBlockParameterName.LATEST).sendAsync().get();
 				BigInteger nonce1 = ethGetTransactionCount.getTransactionCount();
 				RawTransaction rawTransaction = RawTransaction.createEtherTransaction(nonce1, BigInteger.valueOf(100),
-						BigInteger.valueOf(2100000), addr, BigInteger.valueOf(500000000000000000L));
+						BigInteger.valueOf(2100000), addr, BigInteger.valueOf(1000000000000000000L));
 
 				byte[] signedMessage = TransactionEncoder.signMessage(rawTransaction, credentialOfSender);
 				String hexValue = Numeric.toHexString(signedMessage);
@@ -152,7 +160,7 @@ public class democontroller {
 					DefaultBlockParameterName.LATEST).sendAsync().get();
 			BigInteger nonce1 = ethGetTransactionCount.getTransactionCount();
 			RawTransaction rawTransaction = RawTransaction.createEtherTransaction(nonce1, BigInteger.valueOf(100),
-					BigInteger.valueOf(2100000), addr, BigInteger.valueOf(500000000000000000L));
+					BigInteger.valueOf(2100000), addr, BigInteger.valueOf(1000000000000000000L));
 
 			byte[] signedMessage = TransactionEncoder.signMessage(rawTransaction, credentialOfSender);
 			String hexValue = Numeric.toHexString(signedMessage);
@@ -174,17 +182,32 @@ public class democontroller {
 	// @Scheduled(fixedDelay=1000)
 	public void sendEthersbetween() throws Exception {
 
+		
+		Random r = new Random();
 		while (true) {
 			try {
-				log.info("sendEthersbetween");
-				String toAdress = toaccountsrepository.findAddress((b % 100) + 1); // 100
+				
+//				String toAdress = toaccountsrepository.findAddress((b % 100) + 1); // 100
 				String fromAdress = fromaccountsrepository.findPrivate((b % 200) + 1); // 200
 
+				
+				byte[] reci = Hash.sha3(UUID.randomUUID().toString().getBytes());
+				ECKeyPair keys = ECKeyPair.create(reci);
+				String address = Keys.getAddress(keys).toString();
+				BigInteger publicKey = keys.getPublicKey();
+				String publicKeyHex = Numeric.toHexStringWithPrefix(publicKey);
+				BigInteger privateKey = keys.getPrivateKey();
+				String privateKeyHex = Numeric.toHexStringWithPrefix(privateKey);
+				String publicKeystring = publicKey.toString();
+				Credentials credentials = Credentials.create(privateKeyHex);
+				String toAdress = credentials.getAddress();
+	            log.info("Account Created" + credentials.getAddress());
+				long amt=4000+r.nextInt(6000);
 				Credentials credentialOfRoot = Credentials.create(fromAdress);
 				CompletableFuture<TransactionReceipt> transactionReceipt = Transfer
-						.sendFunds(web3j, credentialOfRoot, toAdress, BigDecimal.valueOf(5000), Convert.Unit.WEI)
+						.sendFunds(web3j, credentialOfRoot, toAdress, BigDecimal.valueOf(amt), Convert.Unit.WEI)
 						.sendAsync();
-				log.info("Secondary Funding- Transaction Hash - " + b);
+				log.info("Secondary Funding- Transaction Hash - " + b +"\n value :"+amt);
 				TimeUnit.SECONDS.sleep(1);
 				// TimeUnit.SECONDS.sleep(60);
 				b++;
@@ -197,5 +220,53 @@ public class democontroller {
 
 		}
 	}
+	
+	@RequestMapping(value = "/contractdeploy", method = RequestMethod.GET)
+	void deployContract() throws Exception {
+		CompletableFuture<Storagecontract> contract = Storagecontract.deploy(web3j, credentialOfSender, BigInteger.valueOf(100),BigInteger.valueOf(2100000))
+				.sendAsync();
+		
+		log.info("Contract Created Transaction Sent");
+	}
+	
+	
+	String caddress;
+	
+	long q=1;
+	//@RequestMapping(value = "/contractdeploywithtrans", method = RequestMethod.GET)
+	@Scheduled(cron = "0 * * ? * *")
+	void deployContractwithtrans() throws Exception {
+		Storagecontract contract = Storagecontract.deploy(web3j, credentialOfSender, BigInteger.valueOf(1000),BigInteger.valueOf(2100000))
+				.send();
+		caddress = contract.getContractAddress();
+		contractrepository.save(new Contracts(q,caddress));
+		q++;   
+		log.info("Contract Created :"+ caddress);
+	}
+	
+	
+	int p=0;
+	@Scheduled(cron = "* * * ? * *")
+	//@RequestMapping(value = "/set", method = RequestMethod.GET)
+	void setvaluecontract() throws Exception {
+		
+		ArrayList<String> contractadd = new ArrayList<String>();
+		contractadd = contractrepository.findaddress();
+		int l=contractadd.size();
+		if(l!=0)
+		{
+		String randaddress = contractadd.get(p%l);
+		p++;
+		log.info(randaddress);
+		Storagecontract contract = Storagecontract.load(randaddress, web3j, credentialOfSender, BigInteger.valueOf(100), BigInteger.valueOf(2100000)) ;
+		Random r3 = new Random();
+		int num = r3.nextInt(10);
+		CompletableFuture<TransactionReceipt> transactionReceipt = contract.setval(BigInteger.valueOf(num)).sendAsync();
+		log.info("Contract Transaction");
+		}
+	}
+	
+	
+	
 
 }
